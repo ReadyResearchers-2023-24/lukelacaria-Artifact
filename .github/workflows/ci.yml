@@ -1,0 +1,44 @@
+name: ci
+
+on: 
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out source repository
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: 3.10
+
+    - name: Install Poetry
+      run: |
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install dependencies using Poetry
+      run: |
+        poetry install
+
+    - name: Run linting
+      if : always()
+      run: |
+        poetry run task lint
+
+    - name: Run formatting
+      if: always()
+      run: |
+        poetry run task format
+
+    - name: Run tests
+      if: always()
+      run: |
+        poetry run task test
+      
