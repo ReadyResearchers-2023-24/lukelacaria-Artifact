@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NBA Moneyline Odds</title>
+    <script src="https://unpkg.com/htmx.org"></script>
+    <style>
+        .header {
+            text-align: center;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .main-content {
+            display: flex;
+            width: 100%;
+        }
+        .container {
+            flex: 1;
+            padding: 10px;
+        }
+        .odds-display, .user-input {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Hedgemaster</h1>
+    </div>
+    <div class="main-content">
+        <div class="container">
+            <h2>NBA Moneyline Odds</h2>
+            <form hx-post="/get-odds" hx-target="#odds-display">
+                <label for="team-search">Enter Team Name:</label>
+                <input type="text" id="team-search" name="team_search" required>
+                <button type="submit">Search Odds</button>
+            </form>
+            <div id="odds-display" class="odds-display"></div>
+        </div>
+
+        <div class="container">
+            <h2>Hedge Finder</h2>
+            <div class="user-input">
+                <form hx-post="/hedge-finder" hx-target="#hedge-finder">
+                    <label for="bet-team">Bet on Team:</label>
+                    <input type="text" id="bet-team" name="bet_team" required><br><br>
+
+                    <label for="bet-odds">Bet Odds:</label>
+                    <input type="text" id="bet-odds" name="bet_odds" required><br><br>
+
+                    <label for="bet-amt">Bet Amount: $</label>
+                    <input type="text" id="bet-amt" name="bet_amt" required><br><br>
+
+                    <button type="submit">Submit Bet</button>
+                </form>
+                <div id="hedge-finder" class="hedge-finder"></div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
