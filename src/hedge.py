@@ -37,6 +37,17 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(100), unique=True)
     password = db.Column(db.String(100))
 
+class Bet(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    bet_team = db.Column(db.String(100), nullable=False)
+    bet_odds = db.Column(db.Float, nullable=False)
+    bet_amount = db.Column(db.Float, nullable=False)
+    bookmaker = db.Column(db.String(100), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    def __repr__(self):
+        return f'<Bet {self.bet_team} {self.bet_odds} {self.bet_amount} {self.bookmaker}>'
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -45,7 +56,10 @@ def load_user(user_id):
 def home():
     if not current_user.is_authenticated:
         return redirect(url_for('login'))
-    return render_template('index.html')
+
+    user_bets = Bet.query.filter_by(user_id=current_user.id).all()
+    return render_template('index.html', bets=user_bets)
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -185,7 +199,7 @@ def get_opposing_teams_odds(team_search):
 
         return opposing_teams_odds, opposing_team
 
-def check_arb(bet_team, bet_odds, api_odds):
+def check_hedge(bet_team, bet_odds, api_odds):
     """
     Compares the user inputted bet odds to the odds retrieved from the API and
     calculates whether there is an arbitrage opportunity.
@@ -203,7 +217,7 @@ def check_arb(bet_team, bet_odds, api_odds):
     else:
         return False
 
-def calc_arb(bet_odds, api_odds, bet_amt, bet_team, opp_team):
+def calc_hedge(bet_odds, api_odds, bet_amt, bet_team, opp_team):
     """
     Calculates the amount to bet on the opposing team, total amount bet, total profit, and profit percentage.
     """
@@ -231,10 +245,16 @@ def hedge_finder():
     bet_team = request.form['bet_team']
     bet_odds = float(request.form['bet_odds'])
     bet_amt = float(request.form['bet_amt'])
+    book = request.form['bookmaker']
     opp_odds, opp_team = get_opposing_teams_odds(bet_team)
     api_odds = max(opp_odds) if opp_odds else 0
-    if check_arb(bet_team, bet_odds, api_odds) != False:
-        html_output = calc_arb(bet_odds, api_odds, bet_amt, bet_team, opp_team)
+
+    new_bet = Bet(bet_team=bet_team, bet_odds=bet_odds, bet_amount=bet_amt, bookmaker=book, user_id=current_user.id)
+    db.session.add(new_bet)
+    db.session.commit()
+
+    if check_hedge(bet_team, bet_odds, api_odds) != False:
+        html_output = calc_hedge(bet_odds, api_odds, bet_amt, bet_team, opp_team)
     else:
         html_output = f"<p>There is no arbitrage opportunity</p>"
     return html_output

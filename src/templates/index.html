@@ -99,11 +99,50 @@
                     <label for="bet-amt">Bet Amount: $</label>
                     <input type="text" id="bet-amt" name="bet_amt" required><br><br>
 
+                    <label for="bookmaker">Choose a Bookmaker:</label>
+                    <select id="bookmaker" name="bookmaker" required>
+                        <option value="BetOnline.ag">BetOnline.ag</option>
+                        <option value="BetMGM">BetMGM</option>
+                        <option value="BetRivers">BetRivers</option>
+                        <option value="BetUS">BetUS</option>
+                        <option value="Bovada">Bovada</option>
+                        <option value="DraftKings">DraftKings</option>
+                        <option value="FanDuel">FanDuel</option>
+                        <option value="LowVig.ag">LowVig.ag</option>
+                        <option value="MyBookie.ag">MyBookie.ag</option>
+                        <option value="PointsBet (US)">PointsBet (US)</option>
+                        <option value="SuperBook">SuperBook</option>
+                        <option value="Unibet">Unibet</option>
+                        <option value="Caesars">Caesars</option>
+                        <option value="WynnBET">WynnBET</option>
+                        <option value="betPARX">betPARX</option>
+                        <option value="ESPN BET">ESPN BET</option>
+                        <option value="Fliff">Fliff</option>
+                        <option value="Hard Rock Bet">Hard Rock Bet</option>
+                        <option value="SI Sportsbook">SI Sportsbook</option>
+                        <option value="Tipico">Tipico</option>
+                        <option value="Betfred PA">Betfred PA</option>
+                    </select><br><br>
+
                     <button type="submit">Submit Bet</button>
                 </form>
                 <div id="hedge-finder" class="hedge-finder"></div>
             </div>
         </div>
+    </div>
+    <div>
+        <h3>My Bets</h3>
+        <ul>
+            {% for bet in bets %}
+            <li>
+                <p>Team: {{ bet.bet_team }}</p>
+                <p>Odds: {{ bet.bet_odds }}</p>
+                <p>Amount: {{ bet.bet_amount }}</p>
+            </li>
+            {% else %}
+            <p>No bets placed yet.</p>
+            {% endfor %}
+        </ul>
     </div>
 </body>
 </html>
