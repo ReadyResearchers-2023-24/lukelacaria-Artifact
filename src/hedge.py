@@ -174,14 +174,15 @@ def get_opposing_teams_odds(team_search):
             f"Failed to get odds: status_code {odds_response.status_code},"
             + " response body {odds_response.text}"
         )
-        return None
+        return None, None
     else:
         # Check the usage quota
         print("Remaining requests", odds_response.headers["x-requests-remaining"])
         print("Used requests", odds_response.headers["x-requests-used"])
 
         odds_data = odds_response.json()
-        opposing_teams_odds = []
+        opposing_teams_odds = {}
+        opposing_team = None
 
         for match in odds_data:
             if match["home_team"] == team_search:
@@ -192,28 +193,32 @@ def get_opposing_teams_odds(team_search):
                 continue
 
             for bookmaker in match["bookmakers"]:
+                bookmaker_name = bookmaker["title"]
                 for market in bookmaker["markets"]:
                     for outcome in market["outcomes"]:
                         if outcome["name"] == opposing_team:
-                            opposing_teams_odds.append(outcome["price"])
+                            opposing_teams_odds[bookmaker_name] = outcome["price"]
 
         return opposing_teams_odds, opposing_team
+
 
 def check_hedge(bet_team, bet_odds, api_odds):
     """
     Compares the user inputted bet odds to the odds retrieved from the API and
     calculates whether there is an arbitrage opportunity.
     """
-    get_opposing_teams_odds(bet_team)
-
-    implied_prob_bet = 1 / bet_odds
-    implied_prob_api = 1 / api_odds
-    arb_percent = (1 - (implied_prob_bet + implied_prob_api)) * 100
+    if bet_odds and api_odds != 0:
+        implied_prob_bet = 1 / bet_odds
+        implied_prob_api = 1 / api_odds
+        arb_percent = (1 - (implied_prob_bet + implied_prob_api)) * 100
+    else:
+        arb_percent = 0
 
     if arb_percent > 0:
         print(
             f"\n\nThere is an arbitrage opportunity! You could make a {arb_percent:.2f}% profit."
         )
+        return True
     else:
         return False
 
@@ -245,18 +250,34 @@ def hedge_finder():
     bet_team = request.form['bet_team']
     bet_odds = float(request.form['bet_odds'])
     bet_amt = float(request.form['bet_amt'])
-    book = request.form['bookmaker']
-    opp_odds, opp_team = get_opposing_teams_odds(bet_team)
-    api_odds = max(opp_odds) if opp_odds else 0
+    user_book = request.form['bookmaker']
 
-    new_bet = Bet(bet_team=bet_team, bet_odds=bet_odds, bet_amount=bet_amt, bookmaker=book, user_id=current_user.id)
+    # Fetch odds for the opposing teams
+    opp_odds_data, opp_team = get_opposing_teams_odds(bet_team)
+    
+    # Check if the function returned valid data
+    if opp_odds_data is None:
+        return "<p>Error fetching odds data.</p>"
+
+    # Extract odds for the user's selected bookmaker
+    user_book_odds = opp_odds_data.get(user_book, 0)
+    best_book, best_odds = max(opp_odds_data.items(), key=lambda x: x[1], default=(None, 0))
+
+    # Check arbitrage opportunity on the user's bookmaker
+    if check_hedge(bet_team, bet_odds, user_book_odds):
+        html_output = calc_hedge(bet_odds, user_book_odds, bet_amt, bet_team, opp_team)
+    elif user_book != best_book and check_hedge(bet_team, bet_odds, best_odds):
+        # Check arbitrage opportunity on the bookmaker with the best odds
+        html_output = f"<p>There were no opportunities found on your bookmaker, but we found one on {best_book}.</p>"
+        html_output += calc_hedge(bet_odds, best_odds, bet_amt, bet_team, opp_team)
+    else:
+        html_output = f"<p>There is no arbitrage opportunity</p>"
+
+    # Create and save the new bet record
+    new_bet = Bet(bet_team=bet_team, bet_odds=bet_odds, bet_amount=bet_amt, bookmaker=user_book, user_id=current_user.id)
     db.session.add(new_bet)
     db.session.commit()
 
-    if check_hedge(bet_team, bet_odds, api_odds) != False:
-        html_output = calc_hedge(bet_odds, api_odds, bet_amt, bet_team, opp_team)
-    else:
-        html_output = f"<p>There is no arbitrage opportunity</p>"
     return html_output
 
 if __name__ == '__main__':
