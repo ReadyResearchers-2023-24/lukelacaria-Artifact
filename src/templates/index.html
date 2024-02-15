@@ -78,7 +78,7 @@
     <div class="main-content">
         <div class="container">
             <h2>NBA Moneyline Odds</h2>
-            <form hx-post="/get-odds" hx-target="#odds-display">
+            <form hx-post="/odds-search" hx-target="#odds-display">
                 <label for="team-search">Enter Team Name:</label>
                 <input type="text" id="team-search" name="team_search" required>
                 <button type="submit">Search Odds</button>
@@ -87,9 +87,9 @@
         </div>
 
         <div class="container">
-            <h2>Hedge Finder</h2>
+            <h2>Hedge Search</h2>
             <div class="user-input">
-                <form hx-post="/hedge-finder" hx-target="#hedge-finder">
+                <form hx-post="/hedge-search" hx-target="#hedge-search">
                     <label for="bet-team">Bet on Team:</label>
                     <input type="text" id="bet-team" name="bet_team" required><br><br>
 
@@ -126,7 +126,7 @@
 
                     <button type="submit">Submit Bet</button>
                 </form>
-                <div id="hedge-finder" class="hedge-finder"></div>
+                <div id="hedge-search" class="hedge-search"></div>
             </div>
         </div>
     </div>

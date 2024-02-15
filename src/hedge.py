@@ -3,6 +3,9 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
+import json
+import os
+from flask_apscheduler import APScheduler
 import requests
 
 app = Flask(__name__)
@@ -18,10 +21,6 @@ DATE_FORMAT = "iso"
 @app.route('/')
 def index():
     return render_template('index.html')
-
-
-from flask import Flask, render_template, request, redirect, url_for
-
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'  # SQLite database
@@ -95,14 +94,10 @@ def logout():
     logout_user()
     return redirect(url_for('home'))
 
-
-@app.route('/get-odds', methods=['POST'])
-def get_odds():
+def get_odds_from_api():
     """
     Gets the odds of every game for a specified team and formats it in a readable manner.
     """
-    # Get the team search from the web
-    team_search = request.form.get('team_search')
     # Fetch data from The Odds API
     url = f"https://api.the-odds-api.com/v4/sports/{SPORT}/odds"
     params = {
@@ -114,8 +109,33 @@ def get_odds():
     }
     response = requests.get(url, params=params)
     odds_data = response.json()
-    formatted_data = format_odds_for_web(odds_data, team_search)
-    return formatted_data
+    cache_odds(odds_data)
+
+    return odds_data
+
+@app.route('/odds-search', methods=['POST'])
+def odds_search():
+    team_search = request.form.get('team_search')
+    odds_data = get_odds_from_api()
+    html_output = format_odds_for_web(odds_data, team_search)
+    return html_output
+
+def fetch_and_cache_odds():
+    # Fetch odds data from the API
+    odds_data = get_odds_from_api()
+
+    # Save data to a JSON file
+    cache_odds(odds_data)
+
+def cache_odds(odds_data):
+    with open('odds_cache.json', 'w') as file:
+        json.dump(odds_data, file)
+
+def read_odds_from_cache():
+    if os.path.exists('odds_cache.json'):
+        with open('odds_cache.json', 'r') as file:
+            return json.load(file)
+    return None
 
 def format_odds_for_web(data, team_search):
     """
@@ -154,33 +174,8 @@ def format_odds_for_web(data, team_search):
     return html_output
 
 def get_opposing_teams_odds(team_search):
-    """
-    Retrieves the odds data from the API for a specified team search query and returns odds for opposing teams.
-    """
-    odds_response = requests.get(
-        f"https://api.the-odds-api.com/v4/sports/{SPORT}/odds",
-        params={
-            "api_key": API_KEY,
-            "regions": REGION,
-            "markets": MARKET,
-            "oddsFormat": ODDS_FORMAT,
-            "dateFormat": DATE_FORMAT,
-            "team": team_search,
-        },
-    )
 
-    if odds_response.status_code != 200:
-        print(
-            f"Failed to get odds: status_code {odds_response.status_code},"
-            + " response body {odds_response.text}"
-        )
-        return None, None
-    else:
-        # Check the usage quota
-        print("Remaining requests", odds_response.headers["x-requests-remaining"])
-        print("Used requests", odds_response.headers["x-requests-used"])
-
-        odds_data = odds_response.json()
+        odds_data = get_odds_from_api()
         opposing_teams_odds = {}
         opposing_team = None
 
@@ -245,8 +240,9 @@ def calc_hedge(bet_odds, api_odds, bet_amt, bet_team, opp_team):
 
     return html_output
 
-@app.route('/hedge-finder', methods=['POST', 'GET'])
-def hedge_finder():
+
+@app.route('/hedge-search', methods=['POST', 'GET'])
+def hedge_search():
     bet_team = request.form['bet_team']
     bet_odds = float(request.form['bet_odds'])
     bet_amt = float(request.form['bet_amt'])
@@ -279,6 +275,9 @@ def hedge_finder():
     db.session.commit()
 
     return html_output
+
+#def auto_hedge_check(bet_team, bet_odds, bet_amt, user_book):
+
 
 if __name__ == '__main__':
     with app.app_context():
