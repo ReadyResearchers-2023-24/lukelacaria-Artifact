@@ -236,30 +236,6 @@ def get_opposing_teams_odds(events, team_search):
 
     return opposing_teams_odds, opposing_team, commence_time
 
-def get_opposing_teams_odds_from_cache(team_search):
-
-        odds_data = read_odds_from_cache()
-        opposing_teams_odds = {}
-        opposing_team = None
-
-        for match in odds_data:
-            if match["home_team"] == team_search:
-                opposing_team = match["away_team"]
-            elif match["away_team"] == team_search:
-                opposing_team = match["home_team"]
-            else:
-                continue
-
-            for bookmaker in match["bookmakers"]:
-                bookmaker_name = bookmaker["title"]
-                for market in bookmaker["markets"]:
-                    for outcome in market["outcomes"]:
-                        if outcome["name"] == opposing_team:
-                            opposing_teams_odds[bookmaker_name] = outcome["price"]
-
-        return opposing_teams_odds, opposing_team
-
-
 def check_hedge(bet_team, bet_odds, api_odds):
     """
     Compares the user inputted bet odds to the odds retrieved from the API and
@@ -359,7 +335,7 @@ def filter_recent_games(bets, hours=3.5):
 
     return filtered_bets
 
-def hedge_find(bet_team, bet_odds, bet_amt, user_book):
+def hedge_find(bet_team, bet_odds, bet_amt, user_book, events):
     opp_odds_data, opp_team, commence_time = get_opposing_teams_odds(get_odds_from_api(), bet_team)
     
     if opp_odds_data is None:
@@ -399,8 +375,9 @@ def hedge_search():
     bet_odds = float(request.form['bet_odds'])
     bet_amt = float(request.form['bet_amt'])
     user_book = request.form['bookmaker']
+    events = get_odds_from_api()
 
-    hedge_data = hedge_find(bet_team, bet_odds, bet_amt, user_book)
+    hedge_data = hedge_find(bet_team, bet_odds, bet_amt, user_book, events)
     event_commence_time = hedge_data['commence_time']
     html_output = generate_html_output(hedge_data)
 
@@ -412,6 +389,7 @@ def hedge_search():
     return html_output
 
 def auto_hedge_check():
+    events = get_odds_from_api()
     print("Auto hedge running...")
     with app.app_context():
         all_bets = Bet.query.all()
@@ -419,7 +397,7 @@ def auto_hedge_check():
         filtered_bets = filter_recent_games(all_bets)
         print(filtered_bets)
         for bet in filtered_bets:
-            hedge_data = hedge_find(bet.bet_team, bet.bet_odds, bet.bet_amount, bet.bookmaker)
+            hedge_data = hedge_find(bet.bet_team, bet.bet_odds, bet.bet_amount, bet.bookmaker, events)
             if hedge_data and hedge_data['hedge_opportunity']:
                 # Calculate hedge details
                 hedge_data, _ = calc_hedge(hedge_data)
