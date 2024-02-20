@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_cors import CORS
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from flask_apscheduler import APScheduler
@@ -18,13 +19,11 @@ MARKET = "h2h"
 ODDS_FORMAT = "decimal"
 DATE_FORMAT = "iso"
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'  # SQLite database
 app.config['SECRET_KEY'] = 'your_secret_key'
+
+# Initialize APScheduler
+scheduler = APScheduler()
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -42,35 +41,73 @@ class Bet(db.Model):
     bet_odds = db.Column(db.Float, nullable=False)
     bet_amount = db.Column(db.Float, nullable=False)
     bookmaker = db.Column(db.String(100), nullable=False)
+    commence_time = db.Column(db.DateTime, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
 
     def __repr__(self):
-        return f'<Bet {self.bet_team} {self.bet_odds} {self.bet_amount} {self.bookmaker}>'
+        return f'<Bet {self.bet_team} {self.bet_odds} {self.bet_amount} {self.bookmaker} {self.commence_time}>'
+
+class Hedge(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    bet_team = db.Column(db.String(100), nullable=False)
+    bet_odds = db.Column(db.Float, nullable=False)
+    bet_amount = db.Column(db.Float, nullable=False)
+    user_book = db.Column(db.String(100), nullable=False)
+    opp_team = db.Column(db.String(100), nullable=False)
+    hedge_book = db.Column(db.String(100), nullable=False)
+    hedge_odds = db.Column(db.Float, nullable=False)
+    hedge_bet_amt = db.Column(db.Float, nullable=False)
+    total_bet_amt = db.Column(db.Float, nullable=False)
+    guaranteed_profit = db.Column(db.Float, nullable=False)
+    profit_percentage = db.Column(db.Float, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+class Event:
+    def __init__(self, json_data):
+        self.id = json_data.get('id', None)
+        self.home_team = json_data.get('home_team', '')
+        self.away_team = json_data.get('away_team', '')
+        self.bookmakers = [Bookmaker(bm) for bm in json_data.get('bookmakers', [])]
+        self.commence_time = datetime.fromisoformat(json_data.get('commence_time').replace('Z', '+00:00'))
+
+class Bookmaker:
+    def __init__(self, json_data):
+        self.title = json_data.get('title', '')
+        self.markets = [Market(m) for m in json_data.get('markets', [])]
+
+class Market:
+    def __init__(self, json_data):
+        self.outcomes = [Outcome(o) for o in json_data.get('outcomes', [])]
+
+class Outcome:
+    def __init__(self, json_data):
+        self.name = json_data.get('name', '')
+        self.price = json_data.get('price', 0)
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
 @app.route('/')
-def home():
+def index():
     if not current_user.is_authenticated:
         return redirect(url_for('login'))
 
-    user_bets = Bet.query.filter_by(user_id=current_user.id).all()
+    user_bets = Bet.query.filter_by(user_id=current_user.id).all() if current_user.is_authenticated else []
     return render_template('index.html', bets=user_bets)
 
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('home'))
+        return redirect(url_for('index'))
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
         user = User.query.filter_by(username=username).first()
         if user and check_password_hash(user.password, password):
             login_user(user)
-            return redirect(url_for('home'))
+            return redirect(url_for('index'))
         else:
             return redirect(url_for('login'))
     return render_template('login.html')
@@ -92,7 +129,7 @@ def register():
 @login_required
 def logout():
     logout_user()
-    return redirect(url_for('home'))
+    return redirect(url_for('index'))
 
 def get_odds_from_api():
     """
@@ -109,9 +146,12 @@ def get_odds_from_api():
     }
     response = requests.get(url, params=params)
     odds_data = response.json()
-    cache_odds(odds_data)
-
-    return odds_data
+    events = [Event(item) for item in odds_data]
+    #cache_odds(events)
+    print(events)
+    for event in events:
+        print(event.commence_time)
+    return events
 
 @app.route('/odds-search', methods=['POST'])
 def odds_search():
@@ -137,26 +177,26 @@ def read_odds_from_cache():
             return json.load(file)
     return None
 
-def format_odds_for_web(data, team_search):
+def format_odds_for_web(events, team_search):
     """
     Formats the odds data into HTML for display in a web app.
     """
     grouped_data = {}
 
-    for i in data:
-        if i["home_team"] == team_search or i["away_team"] == team_search:
-            match_key = f"{i['home_team']} vs {i['away_team']}"
+    for event in events:
+        if event.home_team == team_search or event.away_team == team_search:
+            match_key = f"{event.home_team} vs {event.away_team}"
             if match_key not in grouped_data:
                 grouped_data[match_key] = {}
 
-            for bookmaker in i["bookmakers"]:
-                title = bookmaker["title"]
+            for bookmaker in event.bookmakers:
+                title = bookmaker.title
                 if title not in grouped_data[match_key]:
                     grouped_data[match_key][title] = {}
-                for market in bookmaker["markets"]:
-                    for outcome in market["outcomes"]:
-                        team_name = outcome["name"]
-                        odds = outcome["price"]
+                for market in bookmaker.markets:
+                    for outcome in market.outcomes:
+                        team_name = outcome.name
+                        odds = outcome.price
                         grouped_data[match_key][title][team_name] = odds
 
     if not grouped_data:
@@ -173,9 +213,32 @@ def format_odds_for_web(data, team_search):
 
     return html_output
 
-def get_opposing_teams_odds(team_search):
+def get_opposing_teams_odds(events, team_search):
+    opposing_teams_odds = {}
+    opposing_team = None
 
-        odds_data = get_odds_from_api()
+    for event in events:
+        if event.home_team == team_search:
+            commence_time = event.commence_time
+            opposing_team = event.away_team
+        elif event.away_team == team_search:
+            opposing_team = event.home_team
+            commence_time = event.commence_time
+        else:
+            continue
+
+        for bookmaker in event.bookmakers:
+            bookmaker_name = bookmaker.title
+            for market in bookmaker.markets:
+                for outcome in market.outcomes:
+                    if outcome.name == opposing_team:
+                        opposing_teams_odds[bookmaker_name] = outcome.price
+
+    return opposing_teams_odds, opposing_team, commence_time
+
+def get_opposing_teams_odds_from_cache(team_search):
+
+        odds_data = read_odds_from_cache()
         opposing_teams_odds = {}
         opposing_team = None
 
@@ -217,29 +280,118 @@ def check_hedge(bet_team, bet_odds, api_odds):
     else:
         return False
 
-def calc_hedge(bet_odds, api_odds, bet_amt, bet_team, opp_team):
+def calc_hedge(hedge_data):
     """
-    Calculates the amount to bet on the opposing team, total amount bet, total profit, and profit percentage.
+    Calculates the hedging details and updates the hedge_data dictionary.
+
+    Args:
+    - hedge_data (dict): A dictionary containing information about the hedge bet.
+
+    Returns:
+    - dict: Updated hedge_data dictionary with added calculations.
+    - str: HTML output string.
     """
-    hedge_bet_amt = (bet_amt * bet_odds) / api_odds
+    # Calculate the amount to bet on the opposing team
+    hedge_bet_amt = (hedge_data['bet_amount'] * hedge_data['bet_odds']) / hedge_data['hedge_odds']
 
-    total_bet_amt = bet_amt + hedge_bet_amt
+    # Calculate total bet amount
+    total_bet_amt = hedge_data['bet_amount'] + hedge_bet_amt
 
-    profit_if_initial_bet_wins = bet_amt * bet_odds - total_bet_amt
-    profit_if_hedge_bet_wins = hedge_bet_amt * api_odds - total_bet_amt
-
+    # Calculate profits
+    profit_if_initial_bet_wins = hedge_data['bet_amount'] * hedge_data['bet_odds'] - total_bet_amt
+    profit_if_hedge_bet_wins = hedge_bet_amt * hedge_data['hedge_odds'] - total_bet_amt
     guaranteed_profit = min(profit_if_initial_bet_wins, profit_if_hedge_bet_wins)
 
+    # Calculate profit percentage
     profit_percentage = (guaranteed_profit / total_bet_amt) * 100
 
+    # Update hedge_data dictionary
+    hedge_data.update({
+        'hedge_bet_amt': hedge_bet_amt,
+        'total_bet_amt': total_bet_amt,
+        'guaranteed_profit': guaranteed_profit,
+        'profit_percentage': profit_percentage
+    })
+
+    # Generate HTML output
     html_output = "<h2>Hedging Calculation</h2>"
-    html_output += f"<p>Bet on {opp_team}: ${hedge_bet_amt:.2f}</p>"
+    html_output += f"<p>Bet on {hedge_data['opp_team']}: ${hedge_bet_amt:.2f}</p>"
     html_output += f"<p>Total wager: ${total_bet_amt:.2f}</p>"
-    html_output += f"<p>Guaranteed profit: ${guaranteed_profit:.2f}</p>"    
+    html_output += f"<p>Guaranteed profit: ${guaranteed_profit:.2f}</p>"
     html_output += f"<p>Profit percentage: {profit_percentage:.2f}%</p>"
+    print(hedge_data)
+
+    return hedge_data, html_output
+
+def generate_html_output(hedge_data):
+    html_output = ''
+    if hedge_data is None:
+        return "<p>Error fetching odds data.</p>"
+    if hedge_data['hedge_book'] != hedge_data['user_book'] and hedge_data['hedge_opportunity']:
+        html_output = f"<p>There is a hedge opportunity on {hedge_data['hedge_book']}"
+    if hedge_data['hedge_opportunity']:
+        calc_response = calc_hedge(hedge_data)
+        hedge_data = calc_response[0]
+        html_output += calc_response[1]
+    else:
+        html_output = "<p>There is no arbitrage opportunity</p>"
 
     return html_output
 
+def filter_recent_games(bets, hours=3.5):
+    """ Filter out games that have started more than specified hours ago.
+    
+    Args:
+    - bets (list): List of Bet objects.
+    - hours_ago (float): Number of hours to check against.
+
+    Returns:
+    - list: Filtered list of Bet objects.
+    """
+    current_time = datetime.utcnow()
+    filtered_bets = []
+
+    for bet in bets:
+        # Check if the commence_time of the bet is within the specified time range
+        threshold_time = bet.commence_time + timedelta(hours=hours)
+        if current_time < threshold_time:
+            filtered_bets.append(bet)
+
+    return filtered_bets
+
+def hedge_find(bet_team, bet_odds, bet_amt, user_book):
+    opp_odds_data, opp_team, commence_time = get_opposing_teams_odds(get_odds_from_api(), bet_team)
+    
+    if opp_odds_data is None:
+        return None
+
+    user_book_odds = opp_odds_data.get(user_book, 0)
+    best_book, best_odds = max(opp_odds_data.items(), key=lambda x: x[1], default=(None, 0))
+
+    hedge_data = {
+        'bet_team': bet_team,
+        'bet_odds': float(bet_odds),
+        'bet_amount': float(bet_amt),
+        'user_book': user_book,
+        'opp_team': opp_team,
+        'user_book_odds': float(user_book_odds),
+        'best_book': best_book,
+        'best_odds': float(best_odds),
+        'commence_time': commence_time
+    }
+
+    if check_hedge(bet_team, bet_odds, user_book_odds):
+        hedge_data['hedge_opportunity'] = True
+        hedge_data['hedge_book'] = user_book
+        hedge_data['hedge_odds'] = user_book_odds
+    elif user_book != best_book and check_hedge(bet_team, bet_odds, best_odds):
+        hedge_data['hedge_opportunity'] = True
+        hedge_data['hedge_book'] = best_book
+        hedge_data['hedge_odds'] = best_odds
+    else:
+        hedge_data['hedge_opportunity'] = False
+
+    return hedge_data
 
 @app.route('/hedge-search', methods=['POST', 'GET'])
 def hedge_search():
@@ -248,38 +400,57 @@ def hedge_search():
     bet_amt = float(request.form['bet_amt'])
     user_book = request.form['bookmaker']
 
-    # Fetch odds for the opposing teams
-    opp_odds_data, opp_team = get_opposing_teams_odds(bet_team)
-    
-    # Check if the function returned valid data
-    if opp_odds_data is None:
-        return "<p>Error fetching odds data.</p>"
-
-    # Extract odds for the user's selected bookmaker
-    user_book_odds = opp_odds_data.get(user_book, 0)
-    best_book, best_odds = max(opp_odds_data.items(), key=lambda x: x[1], default=(None, 0))
-
-    # Check arbitrage opportunity on the user's bookmaker
-    if check_hedge(bet_team, bet_odds, user_book_odds):
-        html_output = calc_hedge(bet_odds, user_book_odds, bet_amt, bet_team, opp_team)
-    elif user_book != best_book and check_hedge(bet_team, bet_odds, best_odds):
-        # Check arbitrage opportunity on the bookmaker with the best odds
-        html_output = f"<p>There were no opportunities found on your bookmaker, but we found one on {best_book}.</p>"
-        html_output += calc_hedge(bet_odds, best_odds, bet_amt, bet_team, opp_team)
-    else:
-        html_output = f"<p>There is no arbitrage opportunity</p>"
+    hedge_data = hedge_find(bet_team, bet_odds, bet_amt, user_book)
+    event_commence_time = hedge_data['commence_time']
+    html_output = generate_html_output(hedge_data)
 
     # Create and save the new bet record
-    new_bet = Bet(bet_team=bet_team, bet_odds=bet_odds, bet_amount=bet_amt, bookmaker=user_book, user_id=current_user.id)
+    new_bet = Bet(bet_team=bet_team, bet_odds=bet_odds, bet_amount=bet_amt, bookmaker=user_book, commence_time=event_commence_time, user_id=current_user.id)
     db.session.add(new_bet)
     db.session.commit()
 
     return html_output
 
-#def auto_hedge_check(bet_team, bet_odds, bet_amt, user_book):
-
+def auto_hedge_check():
+    print("Auto hedge running...")
+    with app.app_context():
+        all_bets = Bet.query.all()
+        print(all_bets)
+        filtered_bets = filter_recent_games(all_bets)
+        print(filtered_bets)
+        for bet in filtered_bets:
+            hedge_data = hedge_find(bet.bet_team, bet.bet_odds, bet.bet_amount, bet.bookmaker)
+            if hedge_data and hedge_data['hedge_opportunity']:
+                # Calculate hedge details
+                hedge_data, _ = calc_hedge(hedge_data)
+                print("Auto hedge found!")
+                # Create a new hedge record
+                print(hedge_data)
+                new_hedge = Hedge(
+                    bet_team=hedge_data['bet_team'],
+                    bet_odds=hedge_data['bet_odds'],
+                    bet_amount=hedge_data['bet_amount'],
+                    user_book=hedge_data['user_book'],
+                    opp_team=hedge_data['opp_team'],
+                    hedge_book=hedge_data['hedge_book'],
+                    hedge_odds=hedge_data['hedge_odds'],
+                    hedge_bet_amt=hedge_data['hedge_bet_amt'],
+                    total_bet_amt=hedge_data['total_bet_amt'],
+                    guaranteed_profit=hedge_data['guaranteed_profit'],
+                    profit_percentage=hedge_data['profit_percentage'],
+                    user_id=bet.user_id
+                )
+                db.session.add(new_hedge)
+            db.session.commit()
 
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+    # Initialize the scheduler with your Flask app
+    scheduler.init_app(app)
+    scheduler.start()
+
+    # Schedule the auto_hedge_check to run every minute
+    scheduler.add_job(id='auto_hedge_job', func=auto_hedge_check, trigger='interval', minutes=0.15)
+
     app.run(debug=True)
