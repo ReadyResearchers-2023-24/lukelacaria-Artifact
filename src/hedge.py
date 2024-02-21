@@ -8,11 +8,11 @@ import json
 import os
 from flask_apscheduler import APScheduler
 import requests
+from config import API_KEY
 
 app = Flask(__name__)
 CORS(app)
 
-API_KEY = 'ecf1dd9282fb68a2fc952a7cfe2d927a'  # Replace with your The Odds API key
 SPORT = "basketball_nba"
 REGION = "us"
 MARKET = "h2h"
@@ -41,6 +41,7 @@ class Bet(db.Model):
     bet_odds = db.Column(db.Float, nullable=False)
     bet_amount = db.Column(db.Float, nullable=False)
     bookmaker = db.Column(db.String(100), nullable=False)
+    target_arb_percent = db.Column(db.Float, nullable=False)
     commence_time = db.Column(db.DateTime, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
 
@@ -160,23 +161,6 @@ def odds_search():
     html_output = format_odds_for_web(odds_data, team_search)
     return html_output
 
-def fetch_and_cache_odds():
-    # Fetch odds data from the API
-    odds_data = get_odds_from_api()
-
-    # Save data to a JSON file
-    cache_odds(odds_data)
-
-def cache_odds(odds_data):
-    with open('odds_cache.json', 'w') as file:
-        json.dump(odds_data, file)
-
-def read_odds_from_cache():
-    if os.path.exists('odds_cache.json'):
-        with open('odds_cache.json', 'r') as file:
-            return json.load(file)
-    return None
-
 def format_odds_for_web(events, team_search):
     """
     Formats the odds data into HTML for display in a web app.
@@ -236,24 +220,34 @@ def get_opposing_teams_odds(events, team_search):
 
     return opposing_teams_odds, opposing_team, commence_time
 
-def check_hedge(bet_team, bet_odds, api_odds):
+def check_hedge(bet_amount, bet_team, bet_odds, hedge_odds, target_arb_percent):
     """
-    Compares the user inputted bet odds to the odds retrieved from the API and
-    calculates whether there is an arbitrage opportunity.
+    Compares the user inputted bet odds to the hedge odds and
+    calculates whether there is a profitable hedging opportunity.
     """
-    if bet_odds and api_odds != 0:
-        implied_prob_bet = 1 / bet_odds
-        implied_prob_api = 1 / api_odds
-        arb_percent = (1 - (implied_prob_bet + implied_prob_api)) * 100
-    else:
-        arb_percent = 0
+    if bet_odds and hedge_odds != 0:
+        # Calculate the amount to bet on the opposing team
+        hedge_bet_amt = (bet_amount * bet_odds) / hedge_odds
 
-    if arb_percent > 0:
-        print(
-            f"\n\nThere is an arbitrage opportunity! You could make a {arb_percent:.2f}% profit."
-        )
-        return True
+        # Calculate total bet amount
+        total_bet_amt = bet_amount + hedge_bet_amt
+
+        # Calculate profits for each outcome
+        profit_if_bet_wins = (bet_amount * bet_odds) - total_bet_amt
+        profit_if_hedge_wins = (hedge_bet_amt * hedge_odds) - total_bet_amt
+        guaranteed_profit = min(profit_if_bet_wins, profit_if_hedge_wins)
+
+        # Calculate profit percentage
+        profit_percentage = (guaranteed_profit / total_bet_amt) * 100
+
+        if profit_percentage >= target_arb_percent:
+            print(f"\n\nThere is a hedging opportunity! You could make a {profit_percentage:.2f}% profit.")
+            return True
+        else:
+            print(f"\n\nThere is no viable hedging opportunity! The potential profit is {profit_percentage:.2f}%, but you are looking for at least {target_arb_percent:.2f}%.")
+            return False
     else:
+        print("\n\nInvalid odds provided.")
         return False
 
 def calc_hedge(hedge_data):
@@ -335,8 +329,8 @@ def filter_recent_games(bets, hours=3.5):
 
     return filtered_bets
 
-def hedge_find(bet_team, bet_odds, bet_amt, user_book, events):
-    opp_odds_data, opp_team, commence_time = get_opposing_teams_odds(get_odds_from_api(), bet_team)
+def hedge_find(bet_team, bet_odds, bet_amt, user_book, target_arb_percent, events):
+    opp_odds_data, opp_team, commence_time = get_opposing_teams_odds(events, bet_team)
     
     if opp_odds_data is None:
         return None
@@ -356,16 +350,17 @@ def hedge_find(bet_team, bet_odds, bet_amt, user_book, events):
         'commence_time': commence_time
     }
 
-    if check_hedge(bet_team, bet_odds, user_book_odds):
+    if check_hedge(bet_amt, bet_team, bet_odds, user_book_odds, target_arb_percent):
         hedge_data['hedge_opportunity'] = True
         hedge_data['hedge_book'] = user_book
         hedge_data['hedge_odds'] = user_book_odds
-    elif user_book != best_book and check_hedge(bet_team, bet_odds, best_odds):
+    elif user_book != best_book and check_hedge(bet_amt, bet_team, bet_odds, best_odds, target_arb_percent):
         hedge_data['hedge_opportunity'] = True
         hedge_data['hedge_book'] = best_book
         hedge_data['hedge_odds'] = best_odds
     else:
         hedge_data['hedge_opportunity'] = False
+        hedge_data['hedge_book'] = user_book
 
     return hedge_data
 
@@ -375,14 +370,15 @@ def hedge_search():
     bet_odds = float(request.form['bet_odds'])
     bet_amt = float(request.form['bet_amt'])
     user_book = request.form['bookmaker']
+    target_arb_percent = float(request.form['target_arb_percent'])
     events = get_odds_from_api()
 
-    hedge_data = hedge_find(bet_team, bet_odds, bet_amt, user_book, events)
+    hedge_data = hedge_find(bet_team, bet_odds, bet_amt, user_book, target_arb_percent, events)
     event_commence_time = hedge_data['commence_time']
     html_output = generate_html_output(hedge_data)
 
     # Create and save the new bet record
-    new_bet = Bet(bet_team=bet_team, bet_odds=bet_odds, bet_amount=bet_amt, bookmaker=user_book, commence_time=event_commence_time, user_id=current_user.id)
+    new_bet = Bet(bet_team=bet_team, bet_odds=bet_odds, bet_amount=bet_amt, bookmaker=user_book, target_arb_percent=target_arb_percent, commence_time=event_commence_time, user_id=current_user.id)
     db.session.add(new_bet)
     db.session.commit()
 
@@ -397,7 +393,7 @@ def auto_hedge_check():
         filtered_bets = filter_recent_games(all_bets)
         print(filtered_bets)
         for bet in filtered_bets:
-            hedge_data = hedge_find(bet.bet_team, bet.bet_odds, bet.bet_amount, bet.bookmaker, events)
+            hedge_data = hedge_find(bet.bet_team, bet.bet_odds, bet.bet_amount, bet.bookmaker, bet.target_arb_percent, events)
             if hedge_data and hedge_data['hedge_opportunity']:
                 # Calculate hedge details
                 hedge_data, _ = calc_hedge(hedge_data)
@@ -429,6 +425,6 @@ if __name__ == '__main__':
     scheduler.start()
 
     # Schedule the auto_hedge_check to run every minute
-    scheduler.add_job(id='auto_hedge_job', func=auto_hedge_check, trigger='interval', minutes=0.15)
+    scheduler.add_job(id='auto_hedge_job', func=auto_hedge_check, trigger='interval', minutes=.33)
 
     app.run(debug=True)
