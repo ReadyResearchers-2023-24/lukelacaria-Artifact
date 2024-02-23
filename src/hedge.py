@@ -384,13 +384,14 @@ def hedge_search():
 
     return html_output
 
-def auto_hedge_check():
-    events = get_odds_from_api()
-    print("Auto hedge running...")
+def auto_hedge_check(app):
     with app.app_context():
+        print("Auto hedge running...")
         all_bets = Bet.query.all()
         print(all_bets)
         filtered_bets = filter_recent_games(all_bets)
+        if filtered_bets:
+            events = get_odds_from_api()
         print(filtered_bets)
         for bet in filtered_bets:
             hedge_data = hedge_find(bet.bet_team, bet.bet_odds, bet.bet_amount, bet.bookmaker, bet.target_arb_percent, events)
@@ -420,11 +421,11 @@ def auto_hedge_check():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    # Initialize the scheduler with your Flask app
-    scheduler.init_app(app)
-    scheduler.start()
+        scheduler.init_app(app)
+        scheduler.start()
 
-    # Schedule the auto_hedge_check to run every minute
-    scheduler.add_job(id='auto_hedge_job', func=auto_hedge_check, trigger='interval', minutes=.33)
+        # Schedule the auto_hedge_check to run every minute
+        # Pass the 'app' instance to the scheduled job
+        scheduler.add_job(id='auto_hedge_job', func=lambda: auto_hedge_check(app), trigger='interval', minutes=.5)
 
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)
