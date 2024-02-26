@@ -19,7 +19,7 @@ MARKET = "h2h"
 ODDS_FORMAT = "decimal"
 DATE_FORMAT = "iso"
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'  # SQLite database
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hedge.db'  # SQLite database
 app.config['SECRET_KEY'] = 'your_secret_key'
 
 # Initialize APScheduler
@@ -116,7 +116,7 @@ def login():
             return redirect(url_for('login'))
     return render_template('login.html')
 
-'''
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
@@ -129,7 +129,7 @@ def register():
         db.session.commit()
         return redirect(url_for('login'))
     return render_template('register.html')
-'''
+
 
 @app.route('/logout', methods=['GET', 'POST'])
 @login_required
