@@ -116,6 +116,7 @@ def login():
             return redirect(url_for('login'))
     return render_template('login.html')
 
+'''
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
@@ -128,6 +129,7 @@ def register():
         db.session.commit()
         return redirect(url_for('login'))
     return render_template('register.html')
+'''
 
 @app.route('/logout', methods=['GET', 'POST'])
 @login_required
@@ -392,36 +394,36 @@ def auto_hedge_check(app):
     with app.app_context():
         print("Auto hedge running...")
         all_bets = Bet.query.all()
-        print(all_bets)
+        print(f"ALL BETS: {all_bets}")
         filtered_bets = filter_recent_games(all_bets)
+        print(f"FILTERED BETS: {filtered_bets}")
         if filtered_bets:
             events = get_odds_from_api()
-        print(filtered_bets)
-        for bet in filtered_bets:
-            hedge_data = hedge_find(bet.bet_team, bet.opp_team, bet.bet_odds, bet.bet_amount, bet.bookmaker, bet.target_arb_percent, events)
-            if hedge_data and hedge_data['hedge_opportunity']:
-                # Calculate hedge details
-                hedge_data, _ = calc_hedge(hedge_data)
-                print("Auto hedge found!")
-                # Create a new hedge record
-                print(hedge_data)
-                new_hedge = Hedge(
-                    bet_team=hedge_data['bet_team'],
-                    bet_odds=hedge_data['bet_odds'],
-                    bet_amount=hedge_data['bet_amount'],
-                    user_book=hedge_data['user_book'],
-                    opp_team=hedge_data['opp_team'],
-                    hedge_book=hedge_data['hedge_book'],
-                    hedge_odds=hedge_data['hedge_odds'],
-                    hedge_bet_amt=hedge_data['hedge_bet_amt'],
-                    total_bet_amt=hedge_data['total_bet_amt'],
-                    guaranteed_profit=hedge_data['guaranteed_profit'],
-                    profit_percentage=hedge_data['profit_percentage'],
-                    user_id=bet.user_id,
-                    bet_id=bet.id
-                )
-                db.session.add(new_hedge)
-            db.session.commit()
+            for bet in filtered_bets:
+                hedge_data = hedge_find(bet.bet_team, bet.opp_team, bet.bet_odds, bet.bet_amount, bet.bookmaker, bet.target_arb_percent, events)
+                if hedge_data and hedge_data['hedge_opportunity']:
+                    # Calculate hedge details
+                    hedge_data, _ = calc_hedge(hedge_data)
+                    print("Auto hedge found!")
+                    # Create a new hedge record
+                    print(hedge_data)
+                    new_hedge = Hedge(
+                        bet_team=hedge_data['bet_team'],
+                        bet_odds=hedge_data['bet_odds'],
+                        bet_amount=hedge_data['bet_amount'],
+                        user_book=hedge_data['user_book'],
+                        opp_team=hedge_data['opp_team'],
+                        hedge_book=hedge_data['hedge_book'],
+                        hedge_odds=hedge_data['hedge_odds'],
+                        hedge_bet_amt=hedge_data['hedge_bet_amt'],
+                        total_bet_amt=hedge_data['total_bet_amt'],
+                        guaranteed_profit=hedge_data['guaranteed_profit'],
+                        profit_percentage=hedge_data['profit_percentage'],
+                        user_id=bet.user_id,
+                        bet_id=bet.id
+                    )
+                    db.session.add(new_hedge)
+                db.session.commit()
 
 if __name__ == '__main__':
     with app.app_context():
