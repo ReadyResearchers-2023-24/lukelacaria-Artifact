@@ -294,7 +294,6 @@ def calc_hedge(hedge_data):
     html_output += f"<p>Total wager: ${total_bet_amt:.2f}</p>"
     html_output += f"<p>Guaranteed profit: ${guaranteed_profit:.2f}</p>"
     html_output += f"<p>Profit percentage: {profit_percentage:.2f}%</p>"
-    print(hedge_data)
 
     return hedge_data, html_output
 
